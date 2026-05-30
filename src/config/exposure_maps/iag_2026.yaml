@@ -1,0 +1,161 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# EXPOSURE MAP — IAG 2026 (v3 — P&L line decomposition)
+# ═══════════════════════════════════════════════════════════════════════════
+# Versión:                3.0
+# Última actualización:   2026-04-26
+# Fuente principal:       Informe Anual IAG 2025 (publicado 27 feb 2026)
+# Documento referencia:   CorporateMetrics Technical Document (JP Morgan, 1999)
+# ═══════════════════════════════════════════════════════════════════════════
+# Modelo: Operating CF = Revenue - Operating Costs - Taxes - ΔWC
+#         Cada exposición se mapea a una línea concreta de la P&L.
+#         Los impuestos se recalculan automáticamente sobre el EBITDA simulado.
+# ═══════════════════════════════════════════════════════════════════════════
+
+company:
+  code: IAG
+  name: International Airlines Group
+  functional_currency: EUR
+  reporting_period: 2026
+  horizon_quarters: 4
+  tax_rate: 0.25                  # tipo impositivo efectivo aplicado al EBITDA
+
+# ───────────────────────────────────────────────────────────────────────────
+# CASH FLOW TARGET — descompuesto por líneas de la P&L
+# ───────────────────────────────────────────────────────────────────────────
+# Estructura:
+#   Revenue            = 34.306
+#   - Operating costs  = 29.306    (sin amortización; efectivamente OPEX cash)
+#   = EBITDA           =  5.000
+#   - Taxes            =    520    (calculado: EBITDA × tax_rate aprox)
+#   - ΔWC              =   -568    (negativo en la P&L = positivo para CF)
+#   = Operating CF     =  5.048
+# ───────────────────────────────────────────────────────────────────────────
+cash_flow_target:
+  revenue:                 34306    # mm EUR — ingresos esperados 2026
+  operating_costs:         29306    # mm EUR — costes operativos cash (sin D&A)
+  depreciation_amortization: 2800   # mm EUR — D&A no-cash (escudo fiscal)
+  taxes:                     550    # mm EUR — recalculado sobre EBIT
+  wc_change:                 568    # mm EUR — variación favorable WC
+  description: |
+    Construcción del Operating Cash Flow target 2026 a partir de las cinco
+    líneas relevantes de la cuenta de resultados. La depreciation &
+    amortization (D&A) se incluye como concepto fijo no-cash que actúa como
+    escudo fiscal: reduce los impuestos pagados al disminuir el EBIT, pero
+    no afecta al cash flow directamente porque se cancela al pasar de EBIT
+    a Operating CF.
+
+      Revenue                              34.306
+      - Operating costs (cash)             29.306
+      - D&A                                 2.800
+      = EBIT                                2.200
+      - Taxes (EBIT × tax_rate)               550
+      = NOPAT                               1.650
+      + D&A (devuelto: no-cash)             2.800
+      + WC change (favorable)                 568
+      = Operating Cash Flow                 5.018
+  source: |
+    Revenue: 33.210 mm EUR de 2025 × 1,033 (CAGR 3.3% del consenso de
+    analistas).
+    Operating costs: derivado por diferencia para alcanzar EBITDA target de
+    5.000 mm EUR (punto medio entre consenso CAGR y bottom-up con márgenes
+    operativos previstos en informe anual IAG 2025 pág. 193).
+    D&A: 2.800 mm EUR (+6.5% sobre 2025 por nuevas entregas de flota).
+    Taxes: calculado como EBIT × tax_rate.
+    WC change: 568 mm EUR (variación favorable 2025 × 1.033).
+
+# ───────────────────────────────────────────────────────────────────────────
+# EXPOSICIONES — cada una se mapea a una línea de la P&L
+# ───────────────────────────────────────────────────────────────────────────
+# Por cada exposición:
+#   impacto_linea_Q = sign × cantidad_Q × (1 - hedge_ratio) × Δprecio_Q
+#
+# Donde sign indica el efecto sobre la línea P&L:
+#   +1 → la línea sube (más coste, más ingreso)
+#   -1 → la línea baja
+#
+# El efecto sobre el cash flow se calcula automáticamente según la línea:
+#   revenue +X         → CF +X × (1-tax)   (después de impuestos)
+#   operating_costs +X → CF -X × (1-tax)
+#   taxes +X           → CF -X
+#   wc_change +X       → CF -X
+# ───────────────────────────────────────────────────────────────────────────
+exposures:
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Factor 1 — Jet Fuel → afecta a OPERATING COSTS
+  # ─────────────────────────────────────────────────────────────────────────
+  - factor_code: jet_fuel
+    factor_name: Jet Fuel US Gulf Coast
+    pl_line: operating_costs
+    function_type: linear
+    parameters:
+      quantity: 3181              # MILLONES de galones anuales
+      unit: million_gallons
+      hedge_ratio: 0.65
+      hedge_cost_bps: 50          # 50 bp anual sobre el valor cubierto
+      sign: 1                     # subida del fuel sube los costes operativos
+      inverse_rate: false
+      quarterly_distribution: [0.22, 0.24, 0.30, 0.24]   # pico verano (Q3)
+      currency_conversion:
+        factor_code: eur_usd
+        type: divide              # impacto_USD / EUR_USD_t = impacto_EUR
+    source: |
+      Cantidad derivada del coste de fuel anual 2026 (7.400 mm EUR
+      según guidance IAG) dividido por el precio spot y convertido
+      a galones con EUR/USD ~ 0.93.
+      Cálculo: 7400 / (2.50 × 0.93) ≈ 3.181 millones de galones.
+      Cobertura: política grupo 65% media anual.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Factor 2 — EUR/USD → afecta a OPERATING COSTS
+  # ─────────────────────────────────────────────────────────────────────────
+  - factor_code: eur_usd
+    factor_name: EUR/USD Exchange Rate
+    pl_line: operating_costs
+    function_type: linear
+    parameters:
+      quantity: 2700              # MILLONES de USD anuales (déficit estructural)  # TODO REVISAR
+      unit: million_USD
+      hedge_ratio: 0.60
+      hedge_cost_bps: 20
+      sign: 1                     # USD se aprecia (EUR/USD baja) → costes USD
+                                  # convertidos a EUR suben → costes operativos suben
+      inverse_rate: true          # 1/EUR_USD para convertir USD→EUR
+      quarterly_distribution: [0.25, 0.25, 0.25, 0.25]
+    source: |
+      ESTIMACIÓN — el grupo no publica el déficit USD exacto.
+      Cantidad derivada cualitativamente de las notas FX del informe
+      anual IAG 2025 (pág. 204): ~2.500 mm EUR de déficit neto,
+      equivalente a ~2.700 mm USD a EUR/USD ~0.93.
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Factor 3 — EUR/GBP → afecta a REVENUE
+  # ─────────────────────────────────────────────────────────────────────────
+  - factor_code: eur_gbp
+    factor_name: EUR/GBP Exchange Rate
+    pl_line: revenue
+    function_type: linear
+    parameters:
+      quantity: 3300              # MILLONES de GBP anuales (superávit BA)  # TODO REVISAR
+      unit: million_GBP
+      hedge_ratio: 0.60
+      hedge_cost_bps: 25
+      sign: 1                     # GBP se aprecia (EUR/GBP baja) → más EUR
+                                  # por cada GBP de ingreso de BA
+      inverse_rate: true          # 1/EUR_GBP para convertir GBP→EUR
+      quarterly_distribution: [0.22, 0.26, 0.30, 0.22]
+    source: |
+      ESTIMACIÓN — basada en que British Airways genera ~53% de los
+      ingresos del grupo. Net de costes operativos GBP, el superávit
+      estructural en GBP se estima en ~4.000 mm EUR ≈ 3.300 mm GBP.
+
+# ───────────────────────────────────────────────────────────────────────────
+# CONFIGURACIÓN DE SIMULACIÓN
+# ───────────────────────────────────────────────────────────────────────────
+simulation:
+  n_scenarios: 10000
+  seed: 42
+  historical_data_window:
+    start: '2019-01-01'
+    end:   '2024-12-31'
+  confidence_level: 0.95
